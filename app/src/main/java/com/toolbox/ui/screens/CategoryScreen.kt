@@ -23,7 +23,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import com.toolbox.domain.model.Tool
 import com.toolbox.domain.model.ToolCategory
 import com.toolbox.ui.components.ToolCard
 

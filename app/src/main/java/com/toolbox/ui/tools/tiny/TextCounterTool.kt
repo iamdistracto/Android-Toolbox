@@ -17,26 +17,34 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.toolbox.ui.components.FilePickerButton
 import com.toolbox.ui.components.ResultCard
 import com.toolbox.core.OperationState
-import java.io.File
+import android.net.Uri
 
 @Composable
 fun TextCounterTool() {
     var text by remember { mutableStateOf("") }
-    var filePath by remember { mutableStateOf<String?>(null) }
+    var selectedUri by remember { mutableStateOf<Uri?>(null) }
+    var fileName by remember { mutableStateOf<String?>(null) }
     var countResult by remember { mutableStateOf<String?>(null) }
     var operationState by remember { mutableStateOf<OperationState>(OperationState.Idle) }
+    val context = LocalContext.current
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
-            filePath = it.path ?: it.toString()
+            selectedUri = it
+            fileName = it.lastPathSegment ?: "text"
             try {
-                text = File(filePath!!).readText()
+                context.contentResolver.openInputStream(it)?.use { stream ->
+                    text = stream.bufferedReader().use { reader ->
+                        reader.readText()
+                    }
+                } ?: run { text = "" }
             } catch (e: Exception) {
                 text = ""
             }
@@ -67,7 +75,7 @@ fun TextCounterTool() {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         FilePickerButton(
-            filePath = filePath,
+            filePath = fileName,
             onPickClick = { launcher.launch("text/*") },
             label = "Load Text File"
         )

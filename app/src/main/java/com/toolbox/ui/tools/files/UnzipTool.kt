@@ -1,5 +1,7 @@
 package com.toolbox.ui.tools.files
 
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.toolbox.ui.components.FilePickerButton
 import com.toolbox.ui.components.ResultCard
@@ -29,24 +32,18 @@ import java.util.zip.ZipInputStream
 
 @Composable
 fun UnzipTool() {
-    var zipPath by remember { mutableStateOf<String?>(null) }
-    var outputDir by remember { mutableStateOf<String?>(null) }
+    var zipUri by remember { mutableStateOf<Uri?>(null) }
+    var zipFileName by remember { mutableStateOf<String?>(null) }
     var outputName by remember { mutableStateOf("extracted") }
-    var operationState by remember { mutableStateOf(OperationState.Idle) }
+    var operationState by remember { mutableStateOf<OperationState>(OperationState.Idle) }
+    val context = LocalContext.current
 
     val zipLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
         uri?.let {
-            zipPath = it.path ?: it.toString()
-        }
-    }
-
-    val dirLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        uri?.let {
-            outputDir = it.path ?: it.toString()
+            zipUri = it
+            zipFileName = it.lastPathSegment ?: "archive.zip"
         }
     }
 
@@ -57,15 +54,9 @@ fun UnzipTool() {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         FilePickerButton(
-            filePath = zipPath,
+            filePath = zipFileName,
             onPickClick = { zipLauncher.launch("application/zip") },
             label = "Select ZIP File"
-        )
-
-        FilePickerButton(
-            filePath = outputDir,
-            onPickClick = { dirLauncher.launch(null) },
-            label = "Select Output Folder"
         )
 
         TextField(
@@ -76,60 +67,67 @@ fun UnzipTool() {
             singleLine = true
         )
 
-        zipPath?.let { zip ->
-            outputDir?.let { outDir ->
-                OutlinedButton(
-                    onClick = {
-                        operationState = OperationState.Processing
-                        try {
-                            val outputFolder = File(outDir, outputName)
-                            if (!outputFolder.exists()) {
-                                outputFolder.mkdirs()
+        zipUri?.let { uri ->
+            OutlinedButton(
+                onClick = {
+                    operationState = OperationState.Processing
+                    try {
+                        val tempZip = File(context.cacheDir, "temp_${System.currentTimeMillis()}.zip")
+                        context.contentResolver.openInputStream(uri)?.use { input ->
+                            FileOutputStream(tempZip).use { output ->
+                                input.copyTo(output)
                             }
-
-                            ZipInputStream(FileInputStream(zip)).use { zis ->
-                                var entry = zis.nextEntry
-                                while (entry != null) {
-                                    val newFile = File(outputFolder, entry.name)
-                                    if (entry.isDirectory) {
-                                        newFile.mkdirs()
-                                    } else {
-                                        newFile.parentFile?.mkdirs()
-                                        FileOutputStream(newFile).use { fos ->
-                                            zis.copyTo(fos)
-                                        }
-                                    }
-                                    zis.closeEntry()
-                                    entry = zis.nextEntry
-                                }
-                            }
-
-                            operationState = OperationState.Success(outputFolder.absolutePath)
-                        } catch (e: Exception) {
-                            operationState = OperationState.Error("Failed to extract ZIP: ${e.message}", e)
                         }
-                    },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text("Extract ZIP")
-                }
 
-                val success = operationState as? OperationState.Success
-                if (success != null) {
-                    ResultCard(
-                        title = "Extraction Complete",
-                        message = "Files extracted successfully",
-                        isSuccess = true,
-                        outputPath = success.outputPath
-                    )
-                } else if (operationState is OperationState.Error) {
-                    val error = operationState as OperationState.Error
-                    ResultCard(
-                        title = "Extraction Failed",
-                        message = error.message,
-                        isSuccess = false
-                    )
-                }
+                        val outputDir = context.getExternalFilesDir(null)
+                        val outputFolder = File(outputDir, outputName)
+                        if (!outputFolder.exists()) {
+                            outputFolder.mkdirs()
+                        }
+
+                        ZipInputStream(FileInputStream(tempZip)).use { zis ->
+                            var entry = zis.nextEntry
+                            while (entry != null) {
+                                val newFile = File(outputFolder, entry.name)
+                                if (entry.isDirectory) {
+                                    newFile.mkdirs()
+                                } else {
+                                    newFile.parentFile?.mkdirs()
+                                    FileOutputStream(newFile).use { fos ->
+                                        zis.copyTo(fos)
+                                    }
+                                }
+                                zis.closeEntry()
+                                entry = zis.nextEntry
+                            }
+                        }
+
+                        tempZip.delete()
+                        operationState = OperationState.Success(outputFolder.absolutePath)
+                    } catch (e: Exception) {
+                        operationState = OperationState.Error("Failed to extract ZIP: ${e.message}", e)
+                    }
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text("Extract ZIP")
+            }
+
+            val success = operationState as? OperationState.Success
+            if (success != null) {
+                ResultCard(
+                    title = "Extraction Complete",
+                    message = "Files extracted successfully",
+                    isSuccess = true,
+                    outputPath = success.outputPath
+                )
+            } else if (operationState is OperationState.Error) {
+                val error = operationState as OperationState.Error
+                ResultCard(
+                    title = "Extraction Failed",
+                    message = error.message,
+                    isSuccess = false
+                )
             }
         }
     }

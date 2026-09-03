@@ -1,5 +1,7 @@
 package com.toolbox.ui.tools.files
 
+import android.content.ContentResolver
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +19,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.toolbox.ui.components.FilePickerButton
 import com.toolbox.ui.components.ResultCard
@@ -29,17 +32,16 @@ import java.util.zip.ZipOutputStream
 
 @Composable
 fun ZipTool() {
-    var folderPath by remember { mutableStateOf<String?>(null) }
+    var selectedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var outputName by remember { mutableStateOf("archive.zip") }
     var outputPath by remember { mutableStateOf<String?>(null) }
     var operationState by remember { mutableStateOf<OperationState>(OperationState.Idle) }
+    val context = LocalContext.current
 
     val launcher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        uri?.let {
-            folderPath = it.path ?: it.toString()
-        }
+        contract = ActivityResultContracts.GetMultipleContents()
+    ) { uris ->
+        selectedUris = uris
     }
 
     Column(
@@ -49,9 +51,9 @@ fun ZipTool() {
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         FilePickerButton(
-            filePath = folderPath,
-            onPickClick = { launcher.launch(null) },
-            label = "Select Folder"
+            filePath = if (selectedUris.size == 1) selectedUris.first().lastPathSegment else "${selectedUris.size} files selected",
+            onPickClick = { launcher.launch("*/*") },
+            label = "Select Files to Zip"
         )
 
         TextField(
@@ -62,22 +64,27 @@ fun ZipTool() {
             singleLine = true
         )
 
-        folderPath?.let { path ->
+        if (selectedUris.isNotEmpty()) {
             OutlinedButton(
                 onClick = {
                     operationState = OperationState.Processing
                     try {
-                        val folder = File(path)
-                        if (!folder.isDirectory) {
-                            operationState = OperationState.Error("Selected path is not a directory")
-                            return@OutlinedButton
-                        }
+                        val outputDir = context.getExternalFilesDir(null)
+                        val outputFile = File(outputDir, outputName)
+                        var itemCount = 0
 
-                        val outputFile = File(folder.parentFile ?: folder, outputName)
                         ZipOutputStream(FileOutputStream(outputFile)).use { zos ->
-                            val files = folder.listFiles() ?: emptyArray()
-                            for (file in files) {
-                                zipFile(file, file.name, zos)
+                            selectedUris.forEachIndexed { index, uri ->
+                                val fileName = uri.lastPathSegment ?: "file_$index"
+                                val tempFile = File(context.cacheDir, "zip_src_$index")
+                                context.contentResolver.openInputStream(uri)?.use { input ->
+                                    FileOutputStream(tempFile).use { output ->
+                                        input.copyTo(output)
+                                    }
+                                }
+                                zipFile(tempFile, fileName, zos)
+                                tempFile.delete()
+                                itemCount++
                             }
                         }
 
@@ -96,7 +103,7 @@ fun ZipTool() {
             if (success != null) {
                 ResultCard(
                     title = "ZIP Created",
-                    message = "Archive created with ${folderPath?.let { File(it).listFiles()?.size } ?: 0} items",
+                    message = "Archive created with ${selectedUris.size} items",
                     isSuccess = true,
                     outputPath = success.outputPath
                 )
